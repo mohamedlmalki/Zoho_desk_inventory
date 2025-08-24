@@ -150,7 +150,7 @@ export const InvoiceResultsDisplay: React.FC<ResultsDisplayProps> = ({
                       <div className="flex items-center justify-center space-x-2">
                         {result.contactResponse ? (
                           result.contactResponse.success ? <CheckCircle2 className="h-4 w-4 text-green-500" /> : <XCircle className="h-4 w-4 text-destructive" />
-                        ) : (isProcessing && (result.stage === 'contact' || result.stage === 'invoice') ? <Loader2 className="h-4 w-4 animate-spin text-muted-foreground"/> : <div className='h-4 w-4' />)}
+                        ) : (isProcessing ? <Loader2 className="h-4 w-4 animate-spin text-muted-foreground"/> : <div className='h-4 w-4' />)}
                         
                         {result.contactResponse && (
                            <Dialog>
@@ -172,7 +172,7 @@ export const InvoiceResultsDisplay: React.FC<ResultsDisplayProps> = ({
                       <div className="flex items-center justify-center space-x-2">
                         {result.invoiceResponse ? (
                           result.invoiceResponse.success ? <CheckCircle2 className="h-4 w-4 text-green-500" /> : <XCircle className="h-4 w-4 text-destructive" />
-                        ) : (isProcessing && result.stage === 'invoice' && result.contactResponse?.success ? <Loader2 className="h-4 w-4 animate-spin text-muted-foreground"/> : <div className='h-4 w-4' />)}
+                        ) : (isProcessing && result.contactResponse ? <Loader2 className="h-4 w-4 animate-spin text-muted-foreground"/> : <div className='h-4 w-4' />)}
 
                         {result.invoiceResponse && (
                            <Dialog>
@@ -194,7 +194,7 @@ export const InvoiceResultsDisplay: React.FC<ResultsDisplayProps> = ({
                       <div className="flex items-center justify-center space-x-2">
                         {result.emailResponse ? (
                           result.emailResponse.success ? <CheckCircle2 className="h-4 w-4 text-green-500" /> : <XCircle className="h-4 w-4 text-destructive" />
-                        ) : (isProcessing && result.stage === 'complete' ? <Loader2 className="h-4 w-4 animate-spin text-muted-foreground"/> : <div className='h-4 w-4' />)}
+                        ) : (isProcessing && result.invoiceResponse && !result.emailResponse ? <Loader2 className="h-4 w-4 animate-spin text-muted-foreground"/> : <div className='h-4 w-4' />)}
 
                         {result.emailResponse && (
                            <Dialog>

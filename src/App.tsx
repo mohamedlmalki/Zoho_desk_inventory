@@ -6,14 +6,14 @@ import { QueryClient, QueryClientProvider, useQueryClient } from "@tanstack/reac
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { io, Socket } from 'socket.io-client';
 import { useToast } from '@/hooks/use-toast';
-import Index from "./pages/Index";
-import NotFound from "./pages/NotFound";
-import SingleTicket from "./pages/SingleTicket";
-import { ProfileModal } from './components/dashboard/ProfileModal';
-import BulkInvoices from './pages/BulkInvoices';
-import SingleInvoice from './pages/SingleInvoice'; // Import the new page
-import { InvoiceResult } from './components/dashboard/inventory/InvoiceResultsDisplay';
-import { useJobTimer } from './hooks/useJobTimer';
+import Index from "@/pages/Index";
+import NotFound from "@/pages/NotFound";
+import SingleTicket from "@/pages/SingleTicket";
+import { ProfileModal } from '@/components/dashboard/ProfileModal';
+import BulkInvoices from '@/pages/BulkInvoices';
+import SingleInvoice from '@/pages/SingleInvoice'; // Import the new page
+import { InvoiceResult } from '@/components/dashboard/inventory/InvoiceResultsDisplay';
+import { useJobTimer } from '@/hooks/useJobTimer';
 
 const queryClient = new QueryClient();
 const SERVER_URL = "http://localhost:3000";
@@ -35,6 +35,8 @@ export interface InvoiceFormData {
   body: string;
   delay: number;
   displayName: string;
+  sendCustomEmail: boolean;
+  sendDefaultEmail: boolean;
 }
 
 export interface TicketResult {
@@ -128,6 +130,8 @@ const createInitialInvoiceJobState = (): InvoiceJobState => ({
         body: '',
         delay: 1,
         displayName: '',
+        sendCustomEmail: false,
+        sendDefaultEmail: false,
     },
     results: [],
     isProcessing: false,

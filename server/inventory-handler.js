@@ -120,7 +120,7 @@ const handleUpdateOrgDetails = async (socket, data) => {
 };
 
 const handleStartBulkInvoice = async (socket, data) => {
-    const { emails, subject, body, delay, selectedProfileName, activeProfile } = data;
+    const { emails, subject, body, delay, selectedProfileName, activeProfile, sendCustomEmail, sendDefaultEmail } = data;
     const jobId = createJobId(socket.id, selectedProfileName, 'invoice');
     activeJobs[jobId] = { status: 'running' };
 
@@ -140,37 +140,37 @@ const handleStartBulkInvoice = async (socket, data) => {
             const email = emails[i];
             const rowNumber = i + 1;
             let contactResponsePayload = {};
-            let invoiceResponsePayload = {};
-            let contactPersonsForInvoice = [];
+            let contactPersonIds = [];
 
             socket.emit('invoiceResult', { rowNumber, email, stage: 'contact', details: 'Searching for contact...', profileName: selectedProfileName });
             
             const contactName = email.split('@')[0];
             let contactId;
-
+            
             try {
                 const searchResponse = await makeApiCall('get', `/v1/contacts?email=${encodeURIComponent(email)}`, null, activeProfile, 'inventory');
                 if (searchResponse.data.contacts && searchResponse.data.contacts.length > 0) {
-                    const existingContact = searchResponse.data.contacts[0];
-                    contactId = existingContact.contact_id;
-                    
-                    // This part is now more efficient, like your backup
-                    if (Array.isArray(existingContact.contact_persons)) {
-                        contactPersonsForInvoice = existingContact.contact_persons.map(p => ({ contact_person_id: p.contact_person_id }));
-                    }
-                    contactResponsePayload = { success: true, fullResponse: searchResponse.data };
-
+                    contactId = searchResponse.data.contacts[0].contact_id;
+                    console.log(`[INFO] Found existing contact for ${email} with ID: ${contactId}`);
                 } else {
                     socket.emit('invoiceResult', { rowNumber, email, stage: 'contact', details: 'Contact not found, creating...', profileName: selectedProfileName });
                     const newContactData = { contact_name: contactName, contact_persons: [{ email: email, is_primary_contact: true }] };
                     const createResponse = await makeApiCall('post', '/v1/contacts', newContactData, activeProfile, 'inventory');
-                    const newContact = createResponse.data.contact;
-                    contactId = newContact.contact_id;
-                    if (Array.isArray(newContact.contact_persons)) {
-                       contactPersonsForInvoice = newContact.contact_persons.map(p => ({ contact_person_id: p.contact_person_id }));
-                    }
-                    contactResponsePayload = { success: true, fullResponse: createResponse.data };
+                    contactId = createResponse.data.contact.contact_id;
+                    console.log(`[INFO] Created new contact for ${email} with ID: ${contactId}`);
                 }
+                
+                // Fetch full contact details to get contact_person_id
+                const contactDetailsResponse = await makeApiCall('get', `/v1/contacts/${contactId}`, null, activeProfile, 'inventory');
+                const contact = contactDetailsResponse.data.contact;
+                if (Array.isArray(contact.contact_persons) && contact.contact_persons.length > 0) {
+                    contactPersonIds = contact.contact_persons.map(p => p.contact_person_id);
+                    console.log(`[INFO] Found contact person IDs for ${email}: ${contactPersonIds.join(', ')}`);
+                } else {
+                    throw new Error('Could not find a contact person for the contact.');
+                }
+
+                contactResponsePayload = { success: true, fullResponse: contactDetailsResponse.data };
                 socket.emit('invoiceResult', { rowNumber, email, stage: 'invoice', details: 'Contact processed. Creating invoice...', contactResponse: contactResponsePayload, profileName: selectedProfileName });
             
             } catch (contactError) {
@@ -181,52 +181,108 @@ const handleStartBulkInvoice = async (socket, data) => {
             }
 
             let invoiceId;
+            let invoiceResponsePayload;
             try {
                 const invoiceData = {
                     customer_id: contactId,
-                    contact_persons: contactPersonsForInvoice.map(p => p.contact_person_id),
+                    contact_persons_associated: contactPersonIds.map(id => ({ contact_person_id: id })),
                     line_items: [{ name: "Default Service", rate: 100.00, quantity: 1 }],
                 };
-                const invoiceResponse = await makeApiCall('post', '/v1/invoices', invoiceData, activeProfile, 'inventory');
+
+                if (sendDefaultEmail) {
+                    invoiceData.custom_subject = subject;
+                    invoiceData.custom_body = body;
+                }
+                
+                const invoiceUrl = `/v1/invoices${sendDefaultEmail ? '?send=true' : ''}`;
+
+                const invoiceResponse = await makeApiCall('post', invoiceUrl, invoiceData, activeProfile, 'inventory');
                 invoiceId = invoiceResponse.data.invoice.invoice_id;
                 invoiceResponsePayload = { success: true, fullResponse: invoiceResponse.data };
-                socket.emit('invoiceResult', { rowNumber, email, stage: 'invoice', details: 'Invoice created. Sending email...', invoiceResponse: invoiceResponsePayload, profileName: selectedProfileName });
-
+                
+                if (sendDefaultEmail) {
+                    if (invoiceResponse.data.message.includes("error while sending the invoice")) {
+                        socket.emit('invoiceResult', {
+                            rowNumber,
+                            email,
+                            stage: 'complete',
+                            success: false,
+                            details: invoiceResponse.data.message,
+                            invoiceResponse: invoiceResponsePayload,
+                            contactResponse: contactResponsePayload,
+                            profileName: selectedProfileName
+                        });
+                        continue;
+                    } else {
+                        socket.emit('invoiceResult', {
+                            rowNumber,
+                            email,
+                            stage: 'complete',
+                            success: true,
+                            details: `Invoice created and default email sent.`,
+                            invoiceResponse: invoiceResponsePayload,
+                            contactResponse: contactResponsePayload,
+                            emailResponse: { success: true, fullResponse: { message: "Email sent via Zoho's default mechanism." } },
+                            profileName: selectedProfileName
+                        });
+                        continue;
+                    }
+                } else {
+                    socket.emit('invoiceResult', {
+                        rowNumber, 
+                        email, 
+                        stage: 'invoice', 
+                        details: 'Invoice created.',
+                        invoiceResponse: invoiceResponsePayload,
+                        contactResponse: contactResponsePayload,
+                        profileName: selectedProfileName
+                    });
+                }
             } catch (invoiceError) {
                 const { message, fullResponse } = parseError(invoiceError);
                 invoiceResponsePayload = { success: false, fullResponse };
                 socket.emit('invoiceResult', { rowNumber, email, stage: 'complete', success: false, details: `Invoice Creation Error: ${message}`, contactResponse: contactResponsePayload, invoiceResponse: invoiceResponsePayload, profileName: selectedProfileName });
                 continue;
             }
-            
-            try {
-                await new Promise(resolve => setTimeout(resolve, 1000));
-                
-                const emailData = { 
-                    to_mail_ids: [email], 
-                    subject: subject, 
-                    body: body
-                };
-                
-                const emailApiResponse = await makeApiCall('post', `/v1/contacts/${contactId}/email`, emailData, activeProfile, 'inventory');
-                
-                const emailSendResponsePayload = { success: true, fullResponse: emailApiResponse.data };
-                
-                socket.emit('invoiceResult', { 
-                    rowNumber, email, stage: 'complete', success: true, 
-                    details: `Email sent for Invoice #${invoiceResponsePayload.fullResponse?.invoice?.invoice_number}.`, 
-                    invoiceNumber: invoiceResponsePayload.fullResponse?.invoice?.invoice_number,
-                    emailResponse: emailSendResponsePayload,
-                    profileName: selectedProfileName
-                });
 
-            } catch (emailError) {
-                const { message, fullResponse } = parseError(emailError);
-                const emailSendResponsePayload = { success: false, fullResponse };
-                 socket.emit('invoiceResult', { 
-                    rowNumber, email, stage: 'complete', success: false, 
-                    details: `Email Send Error: ${message}`, 
-                    emailResponse: emailSendResponsePayload,
+            if (sendCustomEmail) {
+                try {
+                    const emailData = {
+                        to_mail_ids: [email],
+                        subject: subject,
+                        body: body,
+                        contact_persons: contactPersonIds
+                    };
+                    const emailApiResponse = await makeApiCall('post', `/v1/invoices/${invoiceId}/email`, emailData, activeProfile, 'inventory');
+                    const emailSendResponsePayload = { success: true, fullResponse: emailApiResponse.data };
+                    socket.emit('invoiceResult', {
+                        rowNumber, email, stage: 'complete', success: true,
+                        details: `Custom email sent for Invoice #${invoiceResponsePayload.fullResponse?.invoice?.invoice_number}.`,
+                        invoiceNumber: invoiceResponsePayload.fullResponse?.invoice?.invoice_number,
+                        emailResponse: emailSendResponsePayload,
+                        contactResponse: contactResponsePayload,
+                        invoiceResponse: invoiceResponsePayload,
+                        profileName: selectedProfileName
+                    });
+                } catch (emailError) {
+                    const { message, fullResponse } = parseError(emailError);
+                    const emailSendResponsePayload = { success: false, fullResponse };
+                    socket.emit('invoiceResult', {
+                        rowNumber, email, stage: 'complete', success: false,
+                        details: `Custom Email Send Error: ${message}`,
+                        emailResponse: emailSendResponsePayload,
+                        contactResponse: contactResponsePayload,
+                        invoiceResponse: invoiceResponsePayload,
+                        profileName: selectedProfileName
+                    });
+                }
+            } else if (!sendDefaultEmail) {
+                socket.emit('invoiceResult', {
+                    rowNumber, email, stage: 'complete', success: true,
+                    details: 'Invoice created without sending email.',
+                    invoiceNumber: invoiceResponsePayload.fullResponse?.invoice?.invoice_number,
+                    invoiceResponse: invoiceResponsePayload,
+                    contactResponse: contactResponsePayload,
                     profileName: selectedProfileName
                 });
             }
@@ -263,7 +319,7 @@ const handleSendSingleInvoice = async (data) => {
     try {
         const searchResponse = await makeApiCall('get', `/v1/contacts?email=${encodeURIComponent(email)}`, null, activeProfile, 'inventory');
         let contactId;
-        let contactPersonsForInvoice = [];
+        let contactPersonIds = [];
 
         if (searchResponse.data.contacts && searchResponse.data.contacts.length > 0) {
             contactId = searchResponse.data.contacts[0].contact_id;
@@ -275,18 +331,18 @@ const handleSendSingleInvoice = async (data) => {
             contactId = createResponse.data.contact.contact_id;
             fullResponse.contact = { status: 'created', data: createResponse.data };
         }
-
+        
         const contactDetailsResponse = await makeApiCall('get', `/v1/contacts/${contactId}`, null, activeProfile, 'inventory');
         const contact = contactDetailsResponse.data.contact;
         if (Array.isArray(contact.contact_persons) && contact.contact_persons.length > 0) {
-            contactPersonsForInvoice = contact.contact_persons.map(p => p.contact_person_id);
+            contactPersonIds = contact.contact_persons.map(p => p.contact_person_id);
         } else {
             throw new Error('Could not find a contact person for the contact.');
         }
 
         const invoiceData = {
             customer_id: contactId,
-            contact_person_ids: contactPersonsForInvoice,
+            contact_persons_associated: contactPersonIds.map(id => ({ contact_person_id: id })),
             line_items: [{ name: "Service", description: "General service provided", rate: 0.00, quantity: 1 }],
         };
         const invoiceResponse = await makeApiCall('post', '/v1/invoices', invoiceData, activeProfile, 'inventory');
@@ -300,7 +356,7 @@ const handleSendSingleInvoice = async (data) => {
             to_mail_ids: [email]
         };
         
-        const emailApiResponse = await makeApiCall('post', `/v1/contacts/${contactId}/email`, emailData, activeProfile, 'inventory');
+        const emailApiResponse = await makeApiCall('post', `/v1/invoices/${invoiceId}/email`, emailData, activeProfile, 'inventory');
         fullResponse.email = emailApiResponse.data;
         
         return { 

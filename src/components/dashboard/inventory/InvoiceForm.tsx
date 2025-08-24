@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { Send, Mail, MessageSquare, Users, Clock, FileText, Edit, RefreshCw, Pause, Play, Square, CheckCircle2, XCircle } from 'lucide-react';
 import { InvoiceFormData, InvoiceJobState } from '@/App';
 import { formatTime } from '@/lib/utils';
+import { Checkbox } from '@/components/ui/checkbox';
 
 interface InvoiceFormProps {
   onSubmit: () => void;
@@ -50,9 +51,13 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
     onSubmit();
   };
 
-  const handleInputChange = (field: keyof InvoiceFormData, value: string | number) => {
+  const handleInputChange = (field: keyof Omit<InvoiceFormData, 'sendCustomEmail' | 'sendDefaultEmail'>, value: string | number) => {
     onFormDataChange({ ...formData, [field]: value });
   };
+
+  const handleCheckboxChange = (field: 'sendCustomEmail' | 'sendDefaultEmail', checked: boolean) => {
+    onFormDataChange({ ...formData, [field]: checked });
+  }
   
   const successCount = jobState?.results.filter(r => r.success).length || 0;
   const errorCount = jobState?.results.filter(r => r.success === false).length || 0;
@@ -204,6 +209,38 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
                     disabled={isProcessing}
                   />
                   <span className="text-sm text-muted-foreground">seconds</span>
+                </div>
+              </div>
+              <div className="space-y-2 pt-2">
+                <Label className="flex items-center space-x-2">
+                  <Mail className="h-4 w-4" />
+                  <span>Email Options</span>
+                </Label>
+                <div className="space-y-3 rounded-lg bg-muted/30 p-4 border border-border">
+                  <div className="flex items-start space-x-3">
+                      <Checkbox
+                          id="sendCustomEmail"
+                          checked={formData.sendCustomEmail}
+                          onCheckedChange={(checked) => handleCheckboxChange('sendCustomEmail', !!checked)}
+                          disabled={isProcessing || formData.sendDefaultEmail}
+                      />
+                      <div className="grid gap-1.5 leading-none">
+                          <Label htmlFor="sendCustomEmail" className="font-medium hover:cursor-pointer">Send Custom Email</Label>
+                          <p className="text-xs text-muted-foreground">Use the subject and body from this form to send the email.</p>
+                      </div>
+                  </div>
+                   <div className="flex items-start space-x-3">
+                      <Checkbox
+                          id="sendDefaultEmail"
+                          checked={formData.sendDefaultEmail}
+                          onCheckedChange={(checked) => handleCheckboxChange('sendDefaultEmail', !!checked)}
+                          disabled={isProcessing || formData.sendCustomEmail}
+                      />
+                      <div className="grid gap-1.5 leading-none">
+                          <Label htmlFor="sendDefaultEmail" className="font-medium hover:cursor-pointer">Send Default Zoho Email</Label>
+                          <p className="text-xs text-muted-foreground">Use Zoho's default email template for the invoice.</p>
+                      </div>
+                  </div>
                 </div>
               </div>
             </div>
